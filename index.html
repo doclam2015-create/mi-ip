@@ -15,7 +15,36 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
 :root{--bg:#0a1220;--panel:#111c33;--panel2:#152140;--line:rgba(255,255,255,.08);--text:#eef2ff;--muted:#93a0c8;--accent:#4fd1c5;--v4:#74c0fc;--v6:#b197fc;--ok:#51cf66;--warn:#ffd43b;--bad:#ff6b6b;}
+[data-theme=light]{--bg:#f3f5fb;--panel:#ffffff;--panel2:#f7f9ff;--line:rgba(10,18,32,.1);--text:#0f172a;--muted:#5b6785;--accent:#0f9d8f;--v4:#1c64d8;--v6:#6d4ee0;--ok:#2f9e44;--warn:#c98a00;--bad:#d6336c;}
+[data-theme=light] body{background:radial-gradient(circle at 15% -10%,#dfe7ff 0%,var(--bg) 55%);}
+[data-theme=light] header{background:rgba(243,245,251,.9);}
+[data-theme=light] .tool .ic{background:linear-gradient(135deg,#e6ecff,#f4f7ff);}
+[data-theme=light] .pre,[data-theme=light] .metric canvas,[data-theme=light] .hist canvas{background:rgba(10,18,32,.05);}
+[data-theme=light] .copy,[data-theme=light] .allbtn.sec{background:rgba(10,18,32,.06);}
+[data-theme=light] .badge.b-mut{background:rgba(10,18,32,.08);}
+[data-theme=light] #g-val{fill:#0f172a}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+.card,.tool{animation:up .35s ease both;}
+.tool:nth-child(n+2){animation-delay:calc(var(--i,0)*35ms);}
+@keyframes up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.searchbar{display:flex;gap:8px;}
+.searchbar input{flex:1;min-width:0;background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:14px;padding:13px 14px;font-size:15px;outline:none;}
+.searchbar input:focus{border-color:var(--accent);}
+.searchbar button{background:var(--accent);color:#04231d;border:none;border-radius:14px;padding:0 16px;font-weight:800;}
+.widgets{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+.widget{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;text-align:center;}
+.widget .l{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;}
+.widget .v{font-size:16px;font-weight:800;margin-top:3px;font-variant-numeric:tabular-nums;}
+.pulse{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 0 rgba(81,207,102,.6);animation:pulse 1.6s infinite;margin-right:5px;vertical-align:middle;}
+.pulse.off{background:var(--bad);animation:none;}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(81,207,102,.5)}70%{box-shadow:0 0 0 8px rgba(81,207,102,0)}100%{box-shadow:0 0 0 0 rgba(81,207,102,0)}}
+.actions{display:flex;gap:8px;margin-top:10px;}
+.actions .allbtn{margin-top:0;}
+.hist canvas{width:100%;height:110px;display:block;border-radius:10px;background:rgba(0,0,0,.2);}
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.cmp .h{font-size:12px;font-weight:800;color:var(--accent);word-break:break-all;}
+.cmp .c{font-size:12.5px;padding:6px 0;border-bottom:1px solid var(--line);word-break:break-word;}
+.cmp .c.diff{color:var(--warn);}
 html,body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;}
 body{background:radial-gradient(circle at 15% -10%,#16244a 0%,var(--bg) 55%);min-height:100vh;padding-bottom:calc(24px + env(safe-area-inset-bottom));}
 header{position:sticky;top:0;z-index:20;background:rgba(10,18,32,.9);backdrop-filter:blur(14px);border-bottom:1px solid var(--line);padding:calc(10px + env(safe-area-inset-top)) 14px 10px;display:flex;align-items:center;gap:10px;}
@@ -106,7 +135,7 @@ footer{text-align:center;color:var(--muted);font-size:11px;padding:14px 10px 0;l
 <header>
   <button class="hbtn hidden" id="back">‹ Inicio</button>
   <h1><span class="dot"></span><span id="title">Mi IP</span></h1>
-  <button class="hbtn" id="refresh">↻</button>
+  <button class="hbtn" id="theme" title="Tema">🌙</button><button class="hbtn" id="refresh">↻</button>
 </header>
 <main id="view"></main>
 <footer>Fuentes: ipify · ipwho.is / ipapi.co · RDAP (ARIN, LACNIC, RIPE, APNIC, AFRINIC) · RIPEstat · Cloudflare DNS/Speed · OpenStreetMap. Sin registro, sin claves, sin servidores propios. Geolocalización aproximada.</footer>

@@ -24,7 +24,19 @@ function rowsHTML(pairs, prefix){
   return `<div class="rows">${pairs.filter(([,v])=>v!==undefined && v!==null && v!=="").map(([k,v,mono],i)=>`
     <div class="row"><div class="k">${esc(k)}</div><div class="v ${mono?'mono':''}" id="${prefix}-${i}">${esc(v)}</div><button class="copy" data-copy="${prefix}-${i}">Copiar</button></div>`).join("")}</div>`;
 }
-function copyAllBtn(fn, label="Copiar todo"){ const id="ca"+Math.random().toString(36).slice(2,7); setTimeout(()=>{ const b=$(id); if(b) b.onclick=()=>copyText(fn(), b, "Todo copiado"); }); return `<button class="allbtn sec" id="${id}" style="margin-top:10px">${label}</button>`; }
+const store = { get(k,d){ try{ const v=localStorage.getItem("miip."+k); return v==null?d:JSON.parse(v); }catch{ return d; } }, set(k,v){ try{ localStorage.setItem("miip."+k, JSON.stringify(v)); }catch{} } };
+async function shareText(txt, btn){
+  if (navigator.share){ try { await navigator.share({title:"Mi IP", text:txt}); return; } catch(e){ if (e.name==="AbortError") return; } }
+  copyText(txt, btn, "Copiado (sin compartir)");
+}
+function copyAllBtn(fn, label="Copiar todo"){
+  const id="ca"+Math.random().toString(36).slice(2,7);
+  setTimeout(()=>{ const b=$(id), sh=$(id+"s"); if(b) b.onclick=()=>copyText(fn(), b, "Todo copiado"); if(sh) sh.onclick=()=>shareText(fn(), sh); });
+  return `<div class="actions"><button class="allbtn sec" id="${id}">${label}</button><button class="allbtn sec" id="${id}s">Compartir</button></div>`;
+}
+function applyTheme(t){ document.documentElement.dataset.theme = t; $("theme").textContent = t==="light"?"☀️":"🌙"; document.querySelector('meta[name=theme-color]').content = t==="light"?"#f3f5fb":"#0a1220"; }
+function recents(tool){ return store.get("recent."+tool, []); }
+function addRecent(tool, q){ const r = recents(tool).filter(x=>x!==q); r.unshift(q); store.set("recent."+tool, r.slice(0,6)); }
 function pairsToText(title, pairs){ return title+"\n"+pairs.filter(([,v])=>v).map(([k,v])=>`  ${k}: ${v}`).join("\n"); }
 
 /* ===================== datos de IP ===================== */
@@ -59,6 +71,24 @@ async function fetchInfo(ip){
   try { const d = await getJSON(`https://ipapi.co/${ip}/json/`); if (!d.error) return normApi(d); } catch {}
   return null;
 }
+const HOSTING_RX = /hosting|cloud|server|datacenter|data center|vps|colocation|ovh|hetzner|digitalocean|linode|akamai|vultr|amazon|aws|google llc|microsoft|azure|oracle|alibaba|tencent|m247|datacamp|choopa|leaseweb|contabo|scaleway|ionos|godaddy|namecheap|packet|latitude\.sh|nordvpn|expressvpn|mullvad|surfshark|proton|private internet|cyberghost|vpn|proxy|tor /i;
+async function privacyCheck(ip, info){
+  const out = { tor:null, proxy:null, hosting:null, ptr:null, notas:[] };
+  const tasks = [
+    getJSON(`https://onionoo.torproject.org/summary?search=${ip}&limit=1`,8000).then(d=>{ out.tor = (d.relays||[]).some(r=>(r.a||[]).some(a=>a.replace(/[\[\]]/g,"")===ip)); }).catch(()=>{}),
+    isIPv4(ip) ? getJSON(`https://freeipapi.com/api/json/${ip}`,8000).then(d=>{ if (typeof d.isProxy==="boolean") out.proxy=d.isProxy; }).catch(()=>{}) : Promise.resolve(),
+    doh(ptrName(ip),"PTR").then(d=>{ const h=(d.Answer||[]).find(a=>a.type===12); out.ptr = h? h.data.replace(/\.$/,"") : null; }).catch(()=>{}),
+  ];
+  await Promise.all(tasks);
+  const nombre = `${info?.isp||""} ${info?.org||""}`;
+  out.hosting = HOSTING_RX.test(nombre) || (out.ptr ? /vpn|proxy|tor|exit|node|host|cloud|server|vps/i.test(out.ptr) : false);
+  return out;
+}
+function privacyHTML(p){
+  const b = (ok, txtOk, txtBad, unk) => ok===null ? `<span class="badge b-mut">${unk}</span>` : ok ? `<span class="badge b-bad">${txtBad}</span>` : `<span class="badge b-ok">${txtOk}</span>`;
+  return `<div class="chips">${b(p.tor,"No es nodo Tor","Nodo de salida Tor","Tor: sin datos")}${b(p.proxy,"Sin proxy conocido","Proxy detectado","Proxy: sin datos")}${b(p.hosting,"Red residencial/ISP","Hosting o VPN probable","Hosting: sin datos")}</div>
+    <div class="status" style="text-align:left;margin-top:8px">${p.ptr?`Hostname: <span style="font-family:ui-monospace,monospace">${esc(p.ptr)}</span>. `:""}Tor se verifica contra la lista oficial de relés (Onionoo); proxy según freeipapi; "hosting o VPN" es una heurística por nombre del proveedor y hostname.</div>`;
+}
 function infoText(label, i){ return pairsToText(`Detalles ${label}:`, FIELDS.map(([k,l])=>[l, i[k]])); }
 
 function drawMap(containerId, info){
@@ -90,18 +120,47 @@ const TOOLS = [
   {id:"random", ic:"🎲", nombre:"IP aleatoria", desc:"Genera IPv4 o IPv6 de prueba."},
   {id:"router", ic:"📶", nombre:"IP del router", desc:"Puerta de enlace por marca y cómo hallarla."},
   {id:"conexion", ic:"💻", nombre:"Mi conexión", desc:"HTTP/TLS, nodo, navegador, dispositivo y ping."},
+  {id:"comparar", ic:"⚖️", nombre:"Comparar IPs", desc:"Dos direcciones lado a lado, diferencias resaltadas."},
+  {id:"propagacion", ic:"🌐", nombre:"Propagación DNS", desc:"¿Qué responde cada resolver del mundo?"},
+  {id:"estado", ic:"📡", nombre:"Estado de Internet", desc:"¿Están caídos Google, WhatsApp, bancos…?"},
 ];
 const T = {};
 
 /* ---- Inicio ---- */
 function heroSub(){ const i=S.info.v4||S.info.v6; return i ? `${i.flag} ${i.city}, ${i.country} · ${i.isp}` : ((S.ip4||S.ip6) ? "Sin detalles" : "Consultando…"); }
+function detectQuery(q){
+  q = q.trim();
+  if (!q) return null;
+  if (/^\S+\/\d{1,2}$/.test(q) && isIPv4(q.split("/")[0])) return ["subred", q];
+  if (isIP(q)) return ["lookup", q];
+  if (/^as?\d+$/i.test(q) || /^\d+$/.test(q)) return ["asn", q.replace(/^as/i,"")];
+  if (q.includes("@")) return ["email", q.split("@").pop()];
+  const dom = q.replace(/^https?:\/\//,"").replace(/\/.*$/,"");
+  if (isDomain(dom)) return ["dns", dom];
+  return null;
+}
+let liveTimer=null;
+async function livePing(){
+  const el=$("w-lat"); if(!el) return;
+  const t0=performance.now();
+  try { await fetch("https://speed.cloudflare.com/__down?bytes=0&r="+Math.random(),{cache:"no-store",signal:AbortSignal.timeout(5000)}); const ms=performance.now()-t0; el.textContent=fmt1(ms)+" ms"; el.style.color = ms<60?"var(--ok)":ms<150?"var(--warn)":"var(--bad)"; }
+  catch { el.textContent="—"; }
+}
 T.home = {
   titulo:"Mi IP",
   render(){
-    return `<div class="card hero" data-go="miip" style="cursor:pointer"><h2>Tu IP pública <span class="sub">ver detalles ›</span></h2><div class="big" id="h-ip">${S.ip4||S.ip6||'<div class="skeleton"></div>'}</div><div class="small" id="h-sub">${heroSub()}</div></div>
-      <div class="grid">${TOOLS.map(t=>`<div class="tool" data-go="${t.id}"><div class="ic">${t.ic}</div><b>${t.nombre}</b><span>${t.desc}</span></div>`).join("")}</div>`;
+    const last = store.get("speedhist",[])[0];
+    return `<div class="searchbar"><input id="usearch" placeholder="IP, dominio, ASN, CIDR o correo…" autocapitalize="none" autocorrect="off" spellcheck="false"><button id="ugo">Ir</button></div>
+      <div class="card hero" data-go="miip" style="cursor:pointer"><h2>Tu IP pública <span class="sub">ver detalles ›</span></h2><div class="big" id="h-ip">${S.ip4||S.ip6||'<div class="skeleton"></div>'}</div><div class="small" id="h-sub">${heroSub()}</div></div>
+      <div class="widgets"><div class="widget"><div class="l">Estado</div><div class="v" id="w-on"><span class="pulse ${navigator.onLine?'':'off'}"></span>${navigator.onLine?"En línea":"Sin red"}</div></div><div class="widget"><div class="l">Latencia ahora</div><div class="v" id="w-lat">…</div></div><div class="widget" data-go="velocidad" style="cursor:pointer"><div class="l">Última velocidad</div><div class="v">${last? fmt1(last.d)+" Mb/s" : "—"}</div></div></div>
+      <div class="grid">${TOOLS.map((t,i)=>`<div class="tool" data-go="${t.id}" style="--i:${i}"><div class="ic">${t.ic}</div><b>${t.nombre}</b><span>${t.desc}</span></div>`).join("")}</div>`;
   },
-  async init(){ if (!S.ip4 && !S.ip6) await loadMyIP(); const h=$("h-ip"); if(h){ h.textContent=S.ip4||S.ip6||"No disponible"; $("h-sub").textContent=heroSub(); } }
+  async init(){
+    const goSearch = () => { const d = detectQuery($("usearch").value); if (!d){ $("usearch").style.borderColor="var(--bad)"; setTimeout(()=>$("usearch").style.borderColor="",900); return; } go(d[0], d[1]); };
+    $("ugo").onclick = goSearch; $("usearch").onkeydown = e => { if (e.key==="Enter"){ e.preventDefault(); goSearch(); } };
+    livePing(); clearInterval(liveTimer); liveTimer = setInterval(livePing, 5000);
+    if (!S.ip4 && !S.ip6) await loadMyIP(); const h=$("h-ip"); if(h){ h.textContent=S.ip4||S.ip6||"No disponible"; $("h-sub").textContent=heroSub(); }
+  }
 };
 async function loadMyIP(){
   const [ip4, ip6] = await Promise.all([fetchIP4(), fetchIP6()]);
@@ -118,8 +177,9 @@ T.miip = {
       <div class="card"><h2>IPv6 pública</h2><div class="ipbox"><div class="ipval v6" id="ip6"><div class="skeleton"></div></div><button class="copy" data-copy="ip6">Copiar</button></div></div>
       <div class="card"><h2>Detalles <span class="tabs" id="tabs"><button class="tab ${S.tab==='v4'?'on':''}" data-t="v4">IPv4</button><button class="tab ${S.tab==='v6'?'on':''}" data-t="v6">IPv6</button></span></h2><div id="rows"></div></div>
       <div class="card"><h2>Ubicación aproximada</h2><div class="map" id="map"></div><div class="status" style="margin-top:8px">Fiable a nivel de país; a nivel de ciudad suele reflejar el nodo del proveedor.</div></div>
+      <div class="card"><h2>Privacidad de la conexión</h2><div id="priv"><div class="status">Analizando…</div></div></div>
       <div class="card"><h2>Más sobre mi IP</h2><div class="chips" id="more"></div></div>
-      <button class="allbtn" id="copyall">Copiar todo</button><div class="status" id="status"></div>`;
+      ${copyAllBtn(myIPText)}<div class="status" id="status"></div>`;
   },
   async init(force){
     const paint = () => {
@@ -132,9 +192,9 @@ T.miip = {
       $("more").innerHTML = ip ? `<span class="chip" data-go="whois" data-arg="${esc(ip)}">WHOIS</span>${i?.asnNum?`<span class="chip" data-go="asn" data-arg="${esc(i.asnNum)}">ASN ${esc(i.asnNum)}</span>`:""}<span class="chip" data-go="rdns" data-arg="${esc(ip)}">DNS inverso</span>${S.ip4?`<span class="chip" data-go="dnsbl" data-arg="${esc(S.ip4)}">Listas negras</span>`:""}<span class="chip" data-go="verificar" data-arg="${esc(ip)}">Analizar</span>` : "";
     };
     $("tabs").onclick = e => { const t=e.target.closest(".tab"); if(!t) return; S.tab=t.dataset.t; document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on",x===t)); paint(); };
-    $("copyall").onclick = e => copyText(myIPText(), e.target, "Todo copiado");
     if (force || (!S.ip4 && !S.ip6)){ $("status").textContent="Consultando…"; await loadMyIP(); }
     paint(); $("status").textContent = (S.ip4||S.ip6) ? "Actualizado "+hora() : "No se pudo consultar la IP. Revisa tu conexión.";
+    const ip = S.ip4||S.ip6; if (ip){ privacyCheck(ip, S.info.v4||S.info.v6).then(p=>{ if($("priv")) $("priv").innerHTML = privacyHTML(p); }); } else if($("priv")) $("priv").innerHTML="";
   }
 };
 function myIPText(){
@@ -156,16 +216,26 @@ T.lookup = {
     const pairs = FIELDS.map(([k,l])=>[l,i[k]]);
     $("out").innerHTML = `<div class="card"><h2>Resultado <span class="sub">${esc(q)}</span></h2>${rowsHTML(pairs,"l")}${copyAllBtn(()=>pairsToText("IP "+q, pairs))}</div>
       <div class="card"><h2>Mapa</h2><div class="map" id="map2"></div></div>
+      <div class="card"><h2>Privacidad</h2><div id="priv"><div class="status">Analizando…</div></div></div>
       <div class="card"><h2>Más sobre esta IP</h2><div class="chips"><span class="chip" data-go="whois" data-arg="${esc(q)}">WHOIS</span>${i.asnNum?`<span class="chip" data-go="asn" data-arg="${esc(i.asnNum)}">ASN ${esc(i.asnNum)}</span>`:""}<span class="chip" data-go="rdns" data-arg="${esc(q)}">DNS inverso</span>${isIPv4(q)?`<span class="chip" data-go="dnsbl" data-arg="${esc(q)}">Listas negras</span>`:""}<span class="chip" data-go="verificar" data-arg="${esc(q)}">Analizar</span></div></div>`;
     drawMap("map2", i);
+    privacyCheck(q, i).then(p=>{ if($("priv")) $("priv").innerHTML = privacyHTML(p); });
   }); }
 };
 function wireQuery(handler){
   const run = async () => {
     const q = $("q").value.trim(); if(!q) return;
     $("out").innerHTML = `<div class="status" style="padding:10px 0">Consultando…</div>`;
-    try { await handler(q); } catch(e){ $("out").innerHTML = `<div class="status err" style="padding:10px 0">${esc(e.message)}</div>`; }
+    try { await handler(q); addRecent(S.current, q); paintRecents(); } catch(e){ $("out").innerHTML = `<div class="status err" style="padding:10px 0">${esc(e.message)}</div>`; }
   };
+  const paintRecents = () => {
+    let box = $("recents"); const r = recents(S.current);
+    if (!box){ box=document.createElement("div"); box.id="recents"; box.className="chips"; $("q").closest(".card").appendChild(box); }
+    box.innerHTML = r.length ? `<span class="chip" style="opacity:.6;border:none">Recientes:</span>`+r.map(x=>`<span class="chip" data-r="${esc(x)}">${esc(x)}</span>`).join("")+`<span class="chip" id="clr-rec" title="Borrar recientes">✕</span>` : "";
+    box.querySelectorAll("[data-r]").forEach(c=>c.onclick=()=>{ $("q").value=c.dataset.r; run(); });
+    const clr=$("clr-rec"); if(clr) clr.onclick=()=>{ store.set("recent."+S.current, []); paintRecents(); };
+  };
+  paintRecents();
   $("go").onclick = run; $("q").onkeydown = e => { if(e.key==="Enter"){ e.preventDefault(); $("q").blur(); run(); } };
   document.querySelectorAll(".chip[data-q]").forEach(c=>c.onclick=()=>{ $("q").value=c.dataset.q; run(); });
   if (S.arg){ $("q").value = S.arg; S.arg=null; run(); }
@@ -459,7 +529,7 @@ const SP = { running:false, down:[], up:[], lat:[], xhrs:[] };
 T.velocidad = {
   titulo:"Prueba de velocidad",
   render(){ return `<div class="card"><h2>Velocidad <span class="sub" id="st-server"></span></h2>
-    <div class="gauge-wrap"><svg class="gauge" viewBox="0 0 200 120"><path d="M20 110 A80 80 0 0 1 180 110" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="14" stroke-linecap="round"/><path id="g-arc" d="M20 110 A80 80 0 0 1 180 110" fill="none" stroke="var(--accent)" stroke-width="14" stroke-linecap="round" stroke-dasharray="251.3" stroke-dashoffset="251.3"/><text x="100" y="88" text-anchor="middle" id="g-val" fill="#eef2ff" font-size="30" font-weight="800">—</text><text x="100" y="108" text-anchor="middle" id="g-lbl" fill="#93a0c8" font-size="11" font-weight="700">Mb/s</text></svg></div>
+    <div class="gauge-wrap"><svg class="gauge" viewBox="0 0 200 120"><path d="M20 110 A80 80 0 0 1 180 110" fill="none" stroke="var(--line)" stroke-width="14" stroke-linecap="round"/><path id="g-arc" d="M20 110 A80 80 0 0 1 180 110" fill="none" stroke="var(--accent)" stroke-width="14" stroke-linecap="round" stroke-dasharray="251.3" stroke-dashoffset="251.3"/><text x="100" y="88" text-anchor="middle" id="g-val" fill="#eef2ff" font-size="30" font-weight="800">—</text><text x="100" y="108" text-anchor="middle" id="g-lbl" fill="#93a0c8" font-size="11" font-weight="700">Mb/s</text></svg></div>
     <div class="metrics">
       <div class="metric"><div class="mh">▼ Descarga</div><canvas id="c-down" width="200" height="50"></canvas><div class="mv"><span>Máximo</span><b id="d-max">—</b></div><div class="mv"><span>Media</span><b id="d-avg">—</b></div></div>
       <div class="metric"><div class="mh">▲ Carga</div><canvas id="c-up" width="200" height="50"></canvas><div class="mv"><span>Máximo</span><b id="u-max">—</b></div><div class="mv"><span>Media</span><b id="u-avg">—</b></div></div>
@@ -467,9 +537,21 @@ T.velocidad = {
     </div>
     <button class="allbtn" id="speedbtn" style="margin-top:12px">Iniciar prueba</button>
     <div class="status" id="speedstatus" style="margin-top:8px">Servidor: Cloudflare (speed.cloudflare.com), el nodo más cercano a tu red. Consume ~150 MB de datos.</div>
-    <div id="speedsum"></div></div>`; },
-  init(){ $("speedbtn").onclick = runSpeed; if (SP.running){ $("speedbtn").textContent="Probando…"; $("speedbtn").disabled=true; } else if (SP.down.length) paintSpeedSummary(); }
+    <div id="speedsum"></div></div>
+    <div class="card hist"><h2>Historial <span class="sub" id="hist-n"></span></h2><canvas id="c-hist" width="600" height="110"></canvas><div id="hist-list" class="list" style="margin-top:8px"></div><div class="actions"><button class="allbtn sec" id="hist-clear">Borrar historial</button></div></div>`; },
+  init(){ $("speedbtn").onclick = runSpeed; $("hist-clear").onclick=()=>{ store.set("speedhist",[]); paintHistory(); }; paintHistory(); if (SP.running){ $("speedbtn").textContent="Probando…"; $("speedbtn").disabled=true; } else if (SP.down.length) paintSpeedSummary(); }
 };
+function connLabel(){ const c=navigator.connection||{}; return c.type ? (c.type==="cellular"?"Datos móviles":c.type==="wifi"?"Wi-Fi":c.type) : (c.effectiveType||"—"); }
+function paintHistory(){
+  const h = store.get("speedhist",[]); const n=$("hist-n"); if(!n) return; n.textContent = h.length? `${h.length} prueba${h.length>1?"s":""}`:"";
+  $("hist-list").innerHTML = h.length ? h.slice(0,12).map(x=>`<div class="li"><div><b>${fmt1(x.d)}</b> ▼ · ${fmt1(x.u)} ▲ Mb/s · ${fmt1(x.l)} ms<div style="font-size:11px;color:var(--muted)">${new Date(x.t).toLocaleString("es-CL",{dateStyle:"short",timeStyle:"short"})} · ${esc(x.red)} · ${esc(x.ip||"")}</div></div><span class="badge ${x.d>=100?'b-ok':x.d>=25?'b-ok':x.d>=10?'b-warn':'b-bad'}">${x.d>=25?"Buena":x.d>=10?"Regular":"Lenta"}</span></div>`).join("") : `<div class="status">Aún no hay pruebas guardadas. Se guardan solo en este dispositivo.</div>`;
+  const c=$("c-hist"), ctx=c.getContext("2d"), W=c.width, H=c.height; ctx.clearRect(0,0,W,H);
+  const pts = h.slice(0,30).reverse(); if (pts.length<2) return;
+  const max = Math.max(...pts.map(p=>p.d),1), sx = (W-20)/(pts.length-1);
+  const line = (key,color) => { ctx.beginPath(); ctx.strokeStyle=color; ctx.lineWidth=2; pts.forEach((p,i)=>{ const x=10+i*sx, y=H-8-(p[key]/max)*(H-20); i?ctx.lineTo(x,y):ctx.moveTo(x,y); }); ctx.stroke(); pts.forEach((p,i)=>{ const x=10+i*sx, y=H-8-(p[key]/max)*(H-20); ctx.beginPath(); ctx.arc(x,y,3,0,7); ctx.fillStyle=color; ctx.fill(); }); };
+  line("u","#b197fc"); line("d","#74c0fc");
+  ctx.fillStyle="#93a0c8"; ctx.font="11px system-ui"; ctx.fillText("▼ descarga  ▲ carga  (máx "+fmt1(max)+" Mb/s)", 10, 12);
+}
 function gauge(val, label, max){ const arc=$("g-arc"); if(!arc) return; const frac = val==null?0:Math.min(1, Math.log10(1+val)/Math.log10(1+max)); arc.style.strokeDashoffset=(251.3*(1-frac)).toFixed(1); $("g-val").textContent = val==null?"—":fmt1(val); $("g-lbl").textContent=label; }
 function drawBars(id, data, color){ const c=$(id); if(!c) return; const ctx=c.getContext("2d"), W=c.width, H=c.height; ctx.clearRect(0,0,W,H); if(!data.length) return; const max=Math.max(...data,1e-9), n=Math.max(data.length,30), bw=W/n; ctx.fillStyle=color; data.forEach((v,i)=>{ const h=Math.max(2,(v/max)*(H-4)); ctx.fillRect(i*bw,H-h,Math.max(1,bw-1),h); }); }
 const setT = (id,t) => { const e=$(id); if(e) e.textContent=t; };
@@ -519,9 +601,65 @@ async function runSpeed(){
     setT("speedstatus","Midiendo descarga…"); await testDownload();
     setT("speedstatus","Midiendo carga…"); await testUpload();
     setT("speedstatus","Prueba completa · "+hora()); paintSpeedSummary();
+    const h = store.get("speedhist",[]); h.unshift({t:Date.now(), d:avg(SP.down), u:avg(SP.up), l:Math.min(...SP.lat), red:connLabel(), ip:S.ip4||S.ip6||""}); store.set("speedhist", h.slice(0,50)); paintHistory();
   } catch(e){ if($("speedstatus")){ $("speedstatus").className="status err"; $("speedstatus").textContent="La prueba falló: "+e.message; } }
   SP.running=false; if($("speedbtn")){ $("speedbtn").disabled=false; if(!SP.down.length) $("speedbtn").textContent="Iniciar prueba"; }
 }
+
+/* ---- Comparar IPs ---- */
+T.comparar = {
+  titulo:"Comparar IPs",
+  render(){ return `<div class="card"><h2>Dos direcciones IP</h2><div class="inrow"><input id="qa" placeholder="Primera IP" autocapitalize="none" autocorrect="off" spellcheck="false" value="${esc(S.ip4||"")}"></div><div class="inrow" style="margin-top:8px"><input id="qb" placeholder="Segunda IP" autocapitalize="none" autocorrect="off" spellcheck="false" value="8.8.8.8"><button id="gob">Comparar</button></div></div><div id="out"></div>`; },
+  init(){
+    const run = async () => {
+      const a=$("qa").value.trim(), b=$("qb").value.trim();
+      if(!isIP(a)||!isIP(b)){ $("out").innerHTML=`<div class="status err">Ingresa dos direcciones IP válidas.</div>`; return; }
+      $("out").innerHTML=`<div class="status">Consultando…</div>`;
+      const [ia, ib] = await Promise.all([fetchInfo(a), fetchInfo(b)]);
+      if(!ia||!ib){ $("out").innerHTML=`<div class="status err">No se obtuvo información de una de las IP.</div>`; return; }
+      const same = ia.asnNum && ia.asnNum===ib.asnNum;
+      $("out").innerHTML = `<div class="card"><h2>Resultado ${same?'<span class="badge b-ok">Mismo ASN</span>':'<span class="badge b-mut">ASN distintos</span>'}</h2><div class="cmp"><div class="h">${esc(a)}</div><div class="h">${esc(b)}</div>${FIELDS.slice(1).map(([k,l])=>{ const d = String(ia[k])!==String(ib[k]); return `<div class="c ${d?'diff':''}"><div style="font-size:10px;color:var(--muted)">${l}</div>${esc(ia[k]??"—")}</div><div class="c ${d?'diff':''}"><div style="font-size:10px;color:var(--muted)">${l}</div>${esc(ib[k]??"—")}</div>`; }).join("")}</div><div class="status" style="margin-top:8px">Las diferencias se muestran en amarillo.</div>${copyAllBtn(()=>infoText(a,ia)+"\n\n"+infoText(b,ib))}</div>`;
+    };
+    $("gob").onclick = run; [$("qa"),$("qb")].forEach(i=>i.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); run(); } });
+    if ($("qa").value && $("qb").value) run();
+  }
+};
+
+/* ---- Propagación DNS ---- */
+const RESOLVERS = [["Cloudflare 1.1.1.1","https://cloudflare-dns.com/dns-query"],["Cloudflare 1.1.1.2 (seguridad)","https://security.cloudflare-dns.com/dns-query"],["Google 8.8.8.8","https://dns.google/resolve"],["AliDNS 223.5.5.5 (China)","https://dns.alidns.com/resolve"],["DNS.SB 185.222.222.222 (Europa)","https://doh.dns.sb/dns-query"]];
+T.propagacion = {
+  titulo:"Propagación DNS",
+  render(){ return `<div class="card"><h2>Dominio y tipo</h2><div class="inrow"><input id="q" placeholder="ejemplo.com" inputmode="url" autocapitalize="none" autocorrect="off" spellcheck="false"><select id="type">${["A","AAAA","CNAME","MX","NS","TXT"].map(t=>`<option>${t}</option>`).join("")}</select><button id="go">Consultar</button></div>
+    <div class="chips"><span class="chip" data-q="google.com">google.com</span><span class="chip" data-q="gob.cl">gob.cl</span></div>
+    <p class="lead" style="margin:10px 0 0">Consulta el mismo registro en resolvers públicos de distintas regiones. Tras cambiar un DNS, las respuestas se van igualando a medida que caducan los TTL.</p></div><div id="out"></div>`; },
+  init(){ wireQuery(async q=>{
+    const dom = q.replace(/^https?:\/\//,"").replace(/\/.*$/,"").toLowerCase(); if(!isDomain(dom)) throw new Error("Ingresa un dominio válido.");
+    const type = $("type").value;
+    const res = await Promise.all(RESOLVERS.map(async ([n,u])=>{ const t0=performance.now(); try { const d = await getJSON(`${u}?name=${encodeURIComponent(dom)}&type=${type}`,8000,{accept:"application/dns-json"}); return {n, ms:performance.now()-t0, ans:(d.Answer||[]).filter(a=>a.type===DNS_TYPES[type]).map(a=>a.data.replace(/^"|"$/g,"")).sort()}; } catch(e){ return {n, err:true}; } }));
+    const okRes = res.filter(r=>!r.err); const uniq = new Set(okRes.map(r=>r.ans.join("|"))); const consistent = uniq.size<=1; const allHave = okRes.every(r=>r.ans.length);
+    $("out").innerHTML = `<div class="card"><h2>${esc(dom)} · ${type} ${consistent?'<span class="badge b-ok">Propagado (respuestas iguales)</span>':allHave?'<span class="badge b-warn">Respuestas distintas</span>':'<span class="badge b-bad">Algunos resolvers no lo ven aún</span>'}</h2>${!consistent&&allHave?'<div class="status" style="margin-bottom:8px">Todos responden pero con IP distintas: normal en servicios con DNS geográfico (Google, CDN); en un dominio propio indica propagación en curso.</div>':''}<div class="list">${res.map(r=>`<div class="li" style="flex-direction:column;align-items:stretch;gap:4px"><div style="display:flex;justify-content:space-between"><b>${esc(r.n)}</b>${r.err?'<span class="badge b-bad">Error</span>':`<span class="badge b-mut">${fmt1(r.ms)} ms</span>`}</div>${r.err?"":(r.ans.length?r.ans.map(a=>`<div class="mono">${esc(a)}</div>`).join(""):`<div class="status" style="text-align:left">Sin registros</div>`)}</div>`).join("")}</div>${copyAllBtn(()=>`Propagación ${dom} ${type}\n`+res.map(r=>`${r.n}: ${r.err?"error":(r.ans.join(", ")||"sin registros")}`).join("\n"))}</div>`;
+  }); }
+};
+
+/* ---- Estado de Internet ---- */
+const SERVICES = [["Google","www.google.com"],["YouTube","www.youtube.com"],["WhatsApp","web.whatsapp.com"],["Facebook","www.facebook.com"],["Instagram","www.instagram.com"],["X (Twitter)","x.com"],["TikTok","www.tiktok.com"],["Netflix","www.netflix.com"],["Apple","www.apple.com"],["Microsoft","www.microsoft.com"],["Cloudflare","www.cloudflare.com"],["Amazon","www.amazon.com"],["GitHub","github.com"],["Gob.cl","www.gob.cl"],["BancoEstado","www.bancoestado.cl"],["Banco de Chile","www.bancochile.cl"],["Mercado Libre","www.mercadolibre.cl"],["Wikipedia","es.wikipedia.org"]];
+T.estado = {
+  titulo:"Estado de Internet",
+  render(){ return `<div class="card"><h2>Servicios populares <span class="sub" id="es-sum"></span></h2><p class="lead">Mide desde tu conexión si cada servicio responde y en cuánto tiempo. Si todo falla, el problema es tu red; si falla uno, es ese servicio.</p><div class="list" id="es-list">${SERVICES.map(([n,h])=>`<div class="li" id="es-${h.replace(/\W/g,'_')}"><span>${n}<div style="font-size:11px;color:var(--muted)">${h}</div></span><span class="badge b-mut">…</span></div>`).join("")}</div><div class="actions"><button class="allbtn" id="es-run">Volver a comprobar</button></div></div>`; },
+  async init(){
+    const run = async () => {
+      let ok=0, done=0;
+      await Promise.all(SERVICES.map(async ([n,h])=>{
+        const el=$("es-"+h.replace(/\W/g,'_')).querySelector(".badge"); el.className="badge b-mut"; el.textContent="…";
+        const t0=performance.now();
+        try { await fetch(`https://${h}/?p=${Math.random()}`,{mode:"no-cors",cache:"no-store",signal:AbortSignal.timeout(8000)}); const ms=performance.now()-t0; ok++; el.className="badge "+(ms<400?"b-ok":"b-warn"); el.textContent=fmt1(ms)+" ms"; }
+        catch { el.className="badge b-bad"; el.textContent="Sin respuesta"; }
+        done++; $("es-sum").textContent=`${ok}/${done} responden`;
+      }));
+    };
+    $("es-run").onclick=run; run();
+  }
+};
 
 /* ===================== router ===================== */
 function go(id, arg){ if (arg) S.arg = arg; const h = id==="home" ? "" : "#"+id; if (location.hash===h || (h==="" && !location.hash)) route(); else location.hash = h; }
@@ -529,6 +667,7 @@ async function route(){
   const id = location.hash.replace("#","") || "home";
   const tool = T[id] || T.home;
   if (S.map){ S.map.remove(); S.map=null; S.marker=null; S.circle=null; }
+  if (id!=="home"){ clearInterval(liveTimer); liveTimer=null; }
   $("title").textContent = tool.titulo; $("back").classList.toggle("hidden", id==="home");
   $("refresh").classList.toggle("hidden", !(id==="home"||id==="miip"||id==="conexion"));
   $("view").innerHTML = tool.render();
@@ -543,4 +682,8 @@ document.addEventListener("click", e=>{
 $("back").onclick = () => go("home");
 $("refresh").onclick = async () => { if (S.current==="miip") T.miip.init(true); else if (S.current==="home"){ $("h-ip").innerHTML='<div class="skeleton"></div>'; await loadMyIP(); route(); } else route(); };
 window.addEventListener("hashchange", route);
+applyTheme(store.get("theme", "dark"));
+$("theme").onclick = () => { const t = document.documentElement.dataset.theme==="light" ? "dark" : "light"; store.set("theme", t); applyTheme(t); };
+window.addEventListener("online", ()=>{ const w=$("w-on"); if(w) w.innerHTML='<span class="pulse"></span>En línea'; });
+window.addEventListener("offline", ()=>{ const w=$("w-on"); if(w) w.innerHTML='<span class="pulse off"></span>Sin red'; });
 route();
