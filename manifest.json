@@ -1,0 +1,14 @@
+{
+  "name": "Mi IP",
+  "short_name": "Mi IP",
+  "description": "Tu IP pública IPv4 e IPv6 con ciudad, región, país, código postal, zona horaria, proveedor, ASN y mapa.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0a1220",
+  "theme_color": "#0a1220",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon.png", "sizes": "1024x1024", "type": "image/png" }
+  ]
+}

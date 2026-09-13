@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Mi IP</title>
+<meta name="theme-color" content="#0a1220">
+<meta name="description" content="Muestra tu IP pública IPv4 e IPv6 con ciudad, región, país, código postal, zona horaria, proveedor, ASN y mapa.">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Mi IP">
+<link rel="icon" href="icon-192.png">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+:root{--bg:#0a1220;--panel:#111c33;--panel2:#152140;--line:rgba(255,255,255,.08);--text:#eef2ff;--muted:#93a0c8;--accent:#4fd1c5;--v4:#74c0fc;--v6:#b197fc;}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;}
+body{background:radial-gradient(circle at 15% -10%,#16244a 0%,var(--bg) 55%);min-height:100vh;padding-bottom:calc(20px + env(safe-area-inset-bottom));}
+header{position:sticky;top:0;z-index:20;background:rgba(10,18,32,.9);backdrop-filter:blur(14px);border-bottom:1px solid var(--line);padding:calc(10px + env(safe-area-inset-top)) 14px 10px;display:flex;align-items:center;justify-content:space-between;}
+h1{margin:0;font-size:19px;font-weight:800;display:flex;align-items:center;gap:8px;}
+h1 .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent);}
+.hbtn{background:var(--panel);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:7px 11px;font-size:13px;font-weight:700;}
+main{padding:14px;max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:12px;}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px 16px;}
+.card h2{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);display:flex;align-items:center;justify-content:space-between;}
+.ipbox{display:flex;align-items:center;gap:10px;margin-top:4px;}
+.ipval{flex:1;font-size:22px;font-weight:800;font-variant-numeric:tabular-nums;word-break:break-all;line-height:1.2;}
+.ipval.v4{color:var(--v4);} .ipval.v6{color:var(--v6);font-size:17px;}
+.ipval.none{color:var(--muted);font-size:14px;font-weight:600;}
+.copy{flex:none;background:rgba(255,255,255,.07);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:8px 11px;font-size:12.5px;font-weight:700;}
+.copy.ok{background:var(--accent);color:#04231d;border-color:transparent;}
+.tag{display:inline-block;font-size:10px;font-weight:800;padding:2px 7px;border-radius:999px;background:rgba(255,255,255,.08);color:var(--muted);margin-left:8px;letter-spacing:.4px;}
+.rows{display:flex;flex-direction:column;}
+.row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--line);}
+.row:last-child{border-bottom:none;}
+.row .k{width:118px;flex:none;font-size:12px;color:var(--muted);font-weight:600;}
+.row .v{flex:1;font-size:14px;font-weight:600;word-break:break-word;}
+.row .copy{padding:6px 9px;font-size:11.5px;}
+.tabs{display:flex;gap:6px;}
+.tab{flex:1;text-align:center;font-size:12.5px;font-weight:700;padding:8px;border-radius:10px;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--muted);}
+.tab.on{background:var(--accent);color:#04231d;border-color:transparent;}
+#map{height:300px;border-radius:14px;overflow:hidden;background:#0d1730;border:1px solid var(--line);}
+.leaflet-container{background:#0d1730;}
+.status{font-size:12px;color:var(--muted);text-align:center;}
+.status.err{color:#ff8787;}
+.allbtn{width:100%;background:var(--accent);color:#04231d;border:none;border-radius:12px;padding:12px;font-weight:800;font-size:14px;}
+.allbtn.ok{background:#51cf66;}
+.skeleton{height:18px;border-radius:6px;background:linear-gradient(90deg,rgba(255,255,255,.05),rgba(255,255,255,.12),rgba(255,255,255,.05));background-size:200% 100%;animation:sh 1.2s infinite;}
+@keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
+footer{text-align:center;color:var(--muted);font-size:11px;padding:14px 10px 0;line-height:1.5;}
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="dot"></span>Mi IP</h1>
+  <button class="hbtn" id="refresh">↻ Actualizar</button>
+</header>
+<main>
+  <div class="card">
+    <h2>IPv4 pública</h2>
+    <div class="ipbox"><div class="ipval v4" id="ip4"><div class="skeleton"></div></div><button class="copy" data-copy="ip4">Copiar</button></div>
+  </div>
+  <div class="card">
+    <h2>IPv6 pública</h2>
+    <div class="ipbox"><div class="ipval v6" id="ip6"><div class="skeleton"></div></div><button class="copy" data-copy="ip6">Copiar</button></div>
+  </div>
+
+  <div class="card">
+    <h2>Detalles de la IP <span class="tabs" id="tabs"><button class="tab on" data-t="v4">IPv4</button><button class="tab" data-t="v6">IPv6</button></span></h2>
+    <div class="rows" id="rows"></div>
+  </div>
+
+  <div class="card">
+    <h2>Ubicación aproximada</h2>
+    <div id="map"></div>
+    <div class="status" id="mapnote" style="margin-top:8px;">La ubicación por IP es aproximada: fiable a nivel de país y sólo orientativa a nivel de ciudad.</div>
+  </div>
+
+  <button class="allbtn" id="copyall">Copiar todo</button>
+  <div class="status" id="status"></div>
+  <footer>Datos de ipify.org e ipwho.is / ipapi.co (sin registro ni clave). Mapa © OpenStreetMap. Requiere conexión para consultar; nada se almacena en servidores propios.</footer>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="app.js"></script>
+<script>
+if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(()=>{}));
+</script>
+</body>
+</html>
